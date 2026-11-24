@@ -3,6 +3,7 @@
 // computer they sit side by side.
 
 import * as model from '../model.js';
+import * as sync from '../sync.js';
 import { ui, toast } from '../main.js';
 import {
   h, fmtDate, fmtDay, plural, matchesQuery, describeCadence, firstName, safeUrl, fmtBirthday, ymdOf
@@ -147,6 +148,9 @@ function historySection(c) {
   </section>`;
 }
 
+/** Snooze and Skip show when someone is due within a week, the same window as Today’s list. */
+const ROUND_ACTIONS_DAYS = 7;
+
 function checkInCard(c) {
   const d = model.dueInfo(c);
   const cad = model.cadenceOf(c);
@@ -154,18 +158,37 @@ function checkInCard(c) {
   let headline = 'No reminders';
   let tone = 'quiet';
   if (d) {
-    if (d.days < 0) { headline = 'Was due ' + fmtDate(d.due); tone = 'late'; }
+    if (d.snoozedUntil) { headline = 'Snoozed until ' + fmtDay(d.snoozedUntil); tone = 'quiet'; }
+    else if (d.days < 0) { headline = 'Was due ' + fmtDate(d.due); tone = 'late'; }
     else if (d.days === 0) { headline = 'Due today'; tone = 'late'; }
     else headline = 'Due ' + fmtDay(d.due);
   }
   const rule = !cad || cad.none ? (c.tier ? c.tier + ': no check-in reminders.' : 'No tier set, so no reminders.')
     : (model.TIERS.includes(c.tier) && !String(c.cadence || '').trim() ? c.tier + ' tier, ' : 'Custom: ') + describeCadence(cad) + '.';
-  const lastText = last ? 'Last check-in ' + fmtDate(last.occurredAt) + ' (' + String(last.type || 'logged').toLowerCase() + ').'
-    : (d ? 'Nothing logged yet, so it counts from when you added them' + (c.createdAt ? ' (' + fmtDate(c.createdAt) + ').' : '.') : '');
-  return h`<section class="card">
+  const r = model.round(c);
+  const lastText = r && r.skip ? 'You skipped the round that was due ' + fmtDate(r.skip.from) +
+      (r.skip.row.updatedAt ? ' (on ' + fmtDate(r.skip.row.updatedAt) + ')' : '') + '.'
+    : last ? 'Last check-in ' + fmtDate(last.occurredAt) + ' (' + String(last.type || 'logged').toLowerCase() + ').'
+      : (d ? 'Nothing logged yet, so it counts from when you added them' + (c.createdAt ? ' (' + fmtDate(c.createdAt) + ').' : '.') : '');
+  const snoozeText = d && d.snoozedUntil ? ' Was due ' + fmtDate(d.due) + '. The reminder comes back that morning.' : '';
+  let buttons = '';
+  if (d && sync.brainAtLeast('1.2.0')) {
+    if (r && r.skip && d.days > ROUND_ACTIONS_DAYS) {
+      buttons = h`<div class="round-actions"><button class="btn small ghost" data-act="undo-skip" data-id="${c.id}">Undo skip</button></div>`;
+    } else if (d.snoozedUntil) {
+      buttons = h`<div class="round-actions"><button class="btn small secondary" data-act="end-snooze" data-id="${c.id}">End snooze</button></div>`;
+    } else if (d.days <= ROUND_ACTIONS_DAYS) {
+      buttons = h`<div class="round-actions">
+        <button class="btn small secondary" data-act="snooze" data-id="${c.id}">Snooze 2 weeks</button>
+        <button class="btn small secondary" data-act="skip" data-id="${c.id}">Skip this round</button>
+      </div>`;
+    }
+  }
+  return h`<section class="card checkin-card">
     <div class="card-head"><h2>Next check-in</h2></div>
     <p class="headline ${tone}">${headline}</p>
-    <p class="card-body muted">${rule} ${lastText}</p>
+    <p class="card-body muted">${rule} ${lastText}${snoozeText}</p>
+    ${buttons}
   </section>`;
 }
 
@@ -269,7 +292,8 @@ function profileChips(c) {
     (cad && !cad.none ? describeCadence(cad) : 'No tier');
   const d = model.dueInfo(c);
   let due = '';
-  if (d && d.days < 0) due = chip('Check-in ' + plural(-d.days, 'day') + ' overdue', 'late');
+  if (d && d.snoozedUntil) due = chip('Snoozed till ' + fmtDate(d.snoozedUntil), 'quiet');
+  else if (d && d.days < 0) due = chip('Check-in ' + plural(-d.days, 'day') + ' overdue', 'late');
   else if (d && d.days === 0) due = chip('Check-in due today', 'late');
   else if (d && d.days <= 14) due = chip('Check-in due ' + fmtDay(d.due).split(',')[0], 'soon');
   const reply = model.replyOwedFor(c.id) ? chip('Reply owed', 'late') : '';
@@ -309,6 +333,7 @@ function phonePage(c) {
     </div>
     ${duplicateNote(c)}
     ${actionButtons(c, false)}
+    ${checkInCard(c)}
     ${tasksCard(c)}
     ${backgroundCard(c)}
     ${orgsCard(c)}
@@ -358,6 +383,30 @@ const sharedActs = {
   hist(el) {
     history.f = el.dataset.f;
     ui.render();
+  },
+  async snooze(el) {
+    const c = model.getLive('Contacts', el.dataset.id);
+    if (!c) return;
+    const undo = await actions.snoozeCheckIn(c);
+    if (undo) toast('Snoozed until ' + fmtDate(undo.until) + '. The reminder comes back that morning.', { action: { label: 'Undo', fn: () => actions.undoRound(undo) } });
+  },
+  async skip(el) {
+    const c = model.getLive('Contacts', el.dataset.id);
+    if (!c) return;
+    const undo = await actions.skipCheckIn(c);
+    if (undo) toast('Skipped. Next check-in ' + fmtDate(undo.next) + '.', { action: { label: 'Undo', fn: () => actions.undoRound(undo) } });
+  },
+  async 'undo-skip'(el) {
+    const c = model.getLive('Contacts', el.dataset.id);
+    if (!c) return;
+    const from = await actions.undoSkip(c);
+    if (from) toast('Skip undone. The check-in is due ' + fmtDate(from) + ' again.');
+  },
+  async 'end-snooze'(el) {
+    const c = model.getLive('Contacts', el.dataset.id);
+    if (!c) return;
+    await actions.endSnooze(c);
+    toast('Snooze ended. ' + firstName(c.name) + ' shows as due again.');
   }
 };
 

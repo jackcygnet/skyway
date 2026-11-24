@@ -31,7 +31,8 @@ export function getLive(t, id) {
 /* ------------------------------------------------------------- settings */
 
 export const DEFAULTS = {
-  reminderAddress: '', 'cadence.Inner circle': '6w', 'cadence.Core': '3m', 'cadence.Network': '6m',
+  reminderAddress: '', remindersOn: 'TRUE', reminderHour: '7', remindersPerDay: '10', taskReminders: 'TRUE',
+  'cadence.Inner circle': '6w', 'cadence.Core': '3m', 'cadence.Network': '6m',
   'cadence.On file': 'none', overdueNudgeDays: '14', replyOwedDays: '3', briefingsEnabled: 'TRUE',
   briefingHour: '7', largeEventSize: '9', recurringEventsCount: 'FALSE', skipBulk: 'TRUE',
   overrideLabel: 'Skyway', lockMinutes: '5', healthQuietDays: '2', weeklyBackup: 'TRUE', brainUrl: '', appUrl: '',
@@ -125,22 +126,61 @@ export function lastCheckIn(contactId) {
   return null;
 }
 
-export function nextDue(c) {
-  return memo('due:' + c.id + ':' + c.updatedAt, () => {
+/** Check-in reminder rows (snoozes, skips, emails sent) for one person. */
+export function checkInReminders(contactId) {
+  return (memo('rbc', () => groupBy(live('Reminders'), 'contactId')).get(contactId) || [])
+    .filter((r) => (r.kind || '') === 'Check-in');
+}
+
+/*
+ * The current round, worked out the way the brain does it: the last
+ * check-in (or the day they were added) plus their cadence. "Skip this
+ * round" (a Skipped reminder row) moves it to the skip's date. A snooze
+ * keeps the due date but holds the reminder until snoozeUntil. Rows made
+ * before the round began don't count.
+ */
+export function round(c) {
+  return memo('round:' + c.id, () => {
     const cad = cadenceOf(c);
     if (!cad || cad.none) return null;
     const last = lastCheckIn(c.id);
     const base = last ? last.occurredAt : c.createdAt;
     if (!base) return null;
-    return addCadence(ymdOf(new Date(base)), cad);
+    const baseMs = Date.parse(base);
+    const rows = checkInReminders(c.id).filter((r) => !r.createdAt || !(Date.parse(r.createdAt) < baseMs));
+    let due = addCadence(ymdOf(new Date(base)), cad);
+    let skip = null;
+    for (let n = 0; n < 50; n++) {
+      let next = null;
+      rows.forEach((r) => {
+        if (r.status === 'Skipped' && r.dueAt === due && r.snoozeUntil && r.snoozeUntil > due &&
+          (!next || r.snoozeUntil > next.snoozeUntil)) next = r;
+      });
+      if (!next) break;
+      skip = { row: next, from: due };
+      due = next.snoozeUntil;
+    }
+    const inRound = rows.filter((r) => r.dueAt === due);
+    let snoozedUntil = null;
+    inRound.forEach((r) => {
+      if (r.status === 'Snoozed' && r.snoozeUntil && (!snoozedUntil || r.snoozeUntil > snoozedUntil)) snoozedUntil = r.snoozeUntil;
+    });
+    return { due, cad, base, rows: inRound, snoozedUntil, skip };
   });
 }
 
+export function nextDue(c) {
+  const r = round(c);
+  return r ? r.due : null;
+}
+
+/** { due, days, overdue, snoozedUntil }. snoozedUntil is set only while the snooze lasts. */
 export function dueInfo(c) {
-  const due = nextDue(c);
-  if (!due) return null;
-  const days = daysBetween(todayYmd(), due);
-  return { due, days, overdue: days < 0 };
+  const r = round(c);
+  if (!r) return null;
+  const today = todayYmd();
+  const days = daysBetween(today, r.due);
+  return { due: r.due, days, overdue: days < 0, snoozedUntil: r.snoozedUntil && r.snoozedUntil > today ? r.snoozedUntil : null };
 }
 
 export function replyOwedFor(contactId) {
@@ -152,6 +192,7 @@ export function statusOf(c) {
   if (duplicateOf(c.id)) return { text: 'Possible duplicate', tone: 'late' };
   if (replyOwedFor(c.id)) return { text: 'Reply owed', tone: 'late' };
   const d = dueInfo(c);
+  if (d && d.snoozedUntil) return { text: 'Snoozed till ' + fmtDate(d.snoozedUntil), tone: 'quiet' };
   if (d && d.days < 0) return { text: (-d.days) + (d.days === -1 ? ' day' : ' days') + ' overdue', tone: 'late' };
   if (d && d.days === 0) return { text: 'Due today', tone: 'late' };
   const created = c.createdAt ? daysBetween(ymdOf(new Date(c.createdAt)), todayYmd()) : 99;
@@ -164,6 +205,7 @@ export function statusOf(c) {
 export function dueSentence(c) {
   const d = dueInfo(c);
   if (!d) return 'No check-in reminders';
+  if (d.snoozedUntil) return 'Check-in snoozed until ' + fmtDate(d.snoozedUntil);
   if (d.days < 0) return 'Check-in ' + (-d.days) + (d.days === -1 ? ' day' : ' days') + ' overdue';
   if (d.days === 0) return 'Check-in due today';
   return 'Next check-in ' + fmtDate(d.due);
@@ -178,14 +220,14 @@ export function people() {
 export function peopleDue(daysAhead) {
   return memo('due-list:' + daysAhead, () => people()
     .map((c) => ({ c, d: dueInfo(c) }))
-    .filter((x) => x.d && x.d.days <= daysAhead)
+    .filter((x) => x.d && x.d.days <= daysAhead && !x.d.snoozedUntil)
     .sort((a, b) => a.d.due.localeCompare(b.d.due) || lastNameKey(a.c).localeCompare(lastNameKey(b.c)))
     .map((x) => x.c));
 }
 
 export function needsAttention(c) {
   const d = dueInfo(c);
-  return !!((d && d.days <= 7) || replyOwedFor(c.id) || duplicateOf(c.id));
+  return !!((d && d.days <= 7 && !d.snoozedUntil) || replyOwedFor(c.id) || duplicateOf(c.id));
 }
 
 export function contactLine(c) {

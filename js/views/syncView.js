@@ -58,6 +58,28 @@ function waitingList() {
   </section>`;
 }
 
+const PART_NAMES = { reminders: 'Reminder emails', collector: 'Desktop collector' };
+
+/**
+ * A part of Skyway that reports in (the reminder timer, later the desktop
+ * collector). One that has been quiet longer than healthQuietDays is
+ * flagged, unless it's quiet on purpose (reminders paused or no address).
+ */
+export function healthPart(r) {
+  const quietDays = model.settingNum('healthQuietDays');
+  const last = r.lastCheckInAt ? Date.parse(r.lastCheckInAt) : 0;
+  const days = last ? (Date.now() - last) / 86400000 : Infinity;
+  const resting = r.id === 'reminders' && (!model.settingBool('remindersOn') || !model.setting('reminderAddress'));
+  const name = PART_NAMES[r.id] || r.id;
+  const when = last ? fmtAgo(r.lastCheckInAt) : '';
+  if (resting) return { ok: true, idle: true, name, detail: model.settingBool('remindersOn') ? 'No address yet, so nothing is sent' : 'Paused', when };
+  if (days > quietDays) {
+    return { ok: false, name, when, detail: 'Hasn’t checked in for ' + plural(Math.floor(days), 'day') + '. ' +
+      (r.id === 'reminders' ? 'In the Sheet, choose Skyway > Check setup.' : 'Check that it’s running.') };
+  }
+  return { ok: r.status === 'OK', name, detail: r.status === 'OK' ? (r.details || 'OK') : (r.lastError || r.status), when };
+}
+
 function parts() {
   const s = sync.syncStatus();
   const brainHealth = store.get('Health', 'brain');
@@ -77,9 +99,7 @@ function parts() {
       rows.push({ ok: true, idle: true, name: d.name, detail: deviceDetail(d), when: d.lastSeenAt ? fmtAgo(d.lastSeenAt) : '' });
     });
   }
-  model.healthRows().filter((r) => r.id !== 'brain').forEach((r) => {
-    rows.push({ ok: r.status === 'OK', name: r.id, detail: r.status === 'OK' ? (r.details || 'OK') : (r.lastError || r.status), when: r.lastCheckInAt ? fmtAgo(r.lastCheckInAt) : '' });
-  });
+  model.healthRows().filter((r) => r.id !== 'brain').forEach((r) => rows.push(healthPart(r)));
   return h`<section class="card list parts">${rows.map((p) => h`<div class="row">
     <span class="part-icon ${p.ok ? 'ok' : 'bad'}">${icon(p.ok ? 'checkCircle' : 'alert', 20)}</span>
     <span class="main"><b>${p.name}</b><small>${p.detail}</small></span>

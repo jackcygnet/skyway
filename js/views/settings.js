@@ -1,4 +1,4 @@
-// Skyway app · Settings: check-in tiers, security, devices, your data.
+// Skyway app · Settings: check-in tiers, reminder emails, security, devices, your data.
 // Also the screens for adding a device, changing the PIN, and a new
 // recovery code.
 
@@ -7,7 +7,7 @@ import * as sync from '../sync.js';
 import * as lock from '../lock.js';
 import * as model from '../model.js';
 import { ui, toast, ask } from '../main.js';
-import { h, raw, fmtAgo, fmtDate, fmtTime, plural, describeCadence, CADENCE_CHOICES, safeUrl } from '../util.js';
+import { h, raw, fmtAgo, fmtDate, fmtTime, plural, describeCadence, CADENCE_CHOICES, safeUrl, validEmail, todayYmd, ymdOf } from '../util.js';
 import { icon } from '../icons.js';
 import { qrSvg } from '../qr.js';
 import { APP_VERSION } from '../brain.js';
@@ -44,6 +44,89 @@ export function deviceDetail(d) {
   const days = (Date.now() - Date.parse(d.lastSeenAt)) / 86400000;
   if (days < 1) return 'Synced ' + fmtAgo(d.lastSeenAt);
   return 'Last synced ' + fmtDate(d.lastSeenAt) + (days > 3 ? '. That’s fine if you haven’t used it.' : '');
+}
+
+/* ------------------------------------------------------- reminder status */
+// Whether the brain's hourly timer is on, and how the last run went. Asked
+// for when Settings opens; the settings themselves sync like everything else.
+
+export const reminders = { status: null, error: '', loading: false, at: 0 };
+
+export function loadReminderStatus(force) {
+  if (reminders.loading || !sync.brainAtLeast('1.2.0')) return;
+  if (!force && Date.now() - reminders.at < 60000) return;
+  reminders.loading = true;
+  reminders.error = '';
+  sync.remindersStatus().then((r) => {
+    reminders.status = r;
+  }).catch((err) => {
+    reminders.status = null;
+    reminders.error = err.code === 'offline' ? 'Connect to the internet to see whether reminders are running.' : err.message;
+  }).finally(() => {
+    reminders.at = Date.now();
+    reminders.loading = false;
+    if (/^#\/(settings|more)\b/.test(location.hash)) ui.render();
+  });
+}
+
+function hourLabel(n) { return (n % 12 === 0 ? 12 : n % 12) + (n < 12 ? ' AM' : ' PM'); }
+
+/** One line saying whether reminders are working, from the settings here and the brain's last report. */
+function reminderState() {
+  const st = reminders.status;
+  const addr = model.setting('reminderAddress');
+  if (!sync.brainAtLeast('1.2.0')) {
+    return { tone: 'warn', chip: 'Needs update', text: 'Reminder emails need brain version 1.2.0. Follow step 3 of the setup guide to update it.' };
+  }
+  if (!validEmail(addr)) return { tone: 'warn', chip: 'Off', text: 'Add the address reminders should go to.' };
+  if (!model.settingBool('remindersOn')) return { tone: 'quiet', chip: 'Paused', text: 'Paused. Nothing is lost; turn them back on any time.' };
+  if (reminders.error) return { tone: 'quiet', chip: 'On', text: reminders.error };
+  if (!st) return { tone: 'quiet', chip: 'On', text: 'Checking the brain…' };
+  if (st.timerOn === false) return { tone: 'warn', chip: 'Timer off', text: 'The brain’s hourly timer is off. In the Sheet, choose Skyway > Set up or repair the Sheet.' };
+  if (st.timerOn === null) return { tone: 'warn', chip: 'Needs setup', text: 'The brain can’t send yet. In Apps Script, run setupSkyway once and allow what it asks (setup guide, step 3).' };
+  const h0 = st.health;
+  if (h0 && h0.lastCheckInAt) {
+    const when = ymdOf(new Date(h0.lastCheckInAt)) === todayYmd() ? 'today at ' + fmtTime(h0.lastCheckInAt) : fmtDate(h0.lastCheckInAt);
+    const what = String(h0.details || '').replace(/^[A-Z][a-z]{2} \d{1,2}: /, '');
+    return { tone: h0.status === 'OK' ? 'ok' : 'warn', chip: h0.status === 'OK' ? 'On' : 'Problem', text: 'Last run ' + when + ': ' + what };
+  }
+  return { tone: 'ok', chip: 'On', text: 'On. The first reminders go out at about ' + hourLabel(model.settingNum('reminderHour')) + '.' };
+}
+
+function switchFor(key, label) {
+  return h`<button type="button" class="switch" role="switch" aria-checked="${model.settingBool(key)}" aria-label="${label}"
+    data-act="toggle-setting" data-key="${key}"><span></span></button>`;
+}
+
+function numberSelect(key, label, values, word) {
+  const cur = model.settingNum(key);
+  const list = values.includes(cur) ? values : values.concat([cur]).sort((a, b) => a - b);
+  return h`<select class="pill-select" data-setting="${key}" aria-label="${label}">
+    ${list.map((n) => h`<option value="${n}" ${n === cur ? 'selected' : ''}>${word(n)}</option>`)}</select>`;
+}
+
+function remindersCard() {
+  const state = reminderState();
+  const ready = sync.brainAtLeast('1.2.0');
+  const hours = [];
+  for (let n = 0; n < 24; n++) hours.push(n);
+  return h`<section class="card" id="reminders">
+    <div class="card-head"><h2>Reminder emails</h2><span class="chip ${state.tone === 'warn' ? 'late' : (state.tone === 'ok' ? 'soon' : 'quiet')}">${state.chip}</span></div>
+    <div class="rem-status ${state.tone}"><span>${icon(state.tone === 'warn' ? 'alert' : (state.tone === 'ok' ? 'checkCircle' : 'clock'), 18)}</span><span>${state.text}</span></div>
+    <form class="addr-form" data-form="reminder-address" novalidate>
+      <label class="field"><span>Send reminders to</span>
+        <span class="inline-input"><input type="email" name="address" value="${model.setting('reminderAddress')}" placeholder="you@stthomas.edu"
+          autocomplete="email" inputmode="email" spellcheck="false" data-skip><button class="btn small" type="submit">Save</button></span></label>
+      <p class="error" id="addr-error" hidden></p>
+    </form>
+    ${ready ? h`
+    ${setRow('Send reminder emails', 'Check-ins when someone comes due, from your Gmail', switchFor('remindersOn', 'Send reminder emails'))}
+    ${setRow('Time of day', 'When each day’s reminders go out', numberSelect('reminderHour', 'Time of day', hours, (n) => 'About ' + hourLabel(n)))}
+    ${setRow('One nudge after', 'If a check-in still isn’t logged', numberSelect('overdueNudgeDays', 'Nudge after', [3, 7, 10, 14, 21, 30], (n) => plural(n, 'day')))}
+    ${setRow('Most per day', 'Extras wait for the next day, most overdue first', numberSelect('remindersPerDay', 'Most per day', [3, 5, 10, 15, 20, 30, 50], (n) => String(n)))}
+    ${setRow('Task reminders', 'An email the day a task is due, whoever owes it', switchFor('taskReminders', 'Task reminders'))}
+    ${setRow('Test email', 'A sample reminder. Its buttons work but change nothing.', h`<button class="btn small secondary" data-act="test-email">Send test</button>`)}` : ''}
+  </section>`;
 }
 
 /* ------------------------------------------------------------- settings */
@@ -144,19 +227,55 @@ export const settingsView = {
     return h`<div class="page ${desktop ? 'wide' : ''}">
       ${desktop ? topHead({ title: 'Settings' }) : subHead({ title: 'Settings', back: '#/more' })}
       <div class="${desktop ? 'cols2' : 'stack'}">
-        <div class="stack">${desktop ? syncCard() : ''}${tiersCard()}${securityCard()}</div>
+        <div class="stack">${desktop ? syncCard() : ''}${tiersCard()}${remindersCard()}${securityCard()}</div>
         <div class="stack">${devicesCard()}${dataCard()}${aboutCard()}</div>
       </div>
     </div>`;
   },
-  mount() { loadDevices(false); },
+  mount() {
+    loadDevices(false);
+    loadReminderStatus(false);
+  },
   async change(el) {
     const key = el.dataset.setting;
     if (!key) return;
     await store.save('Settings', { id: key, value: el.value });
     toast('Saved. Your other devices get it at their next sync.');
   },
+  async submit(form) {
+    if (form.dataset.form !== 'reminder-address') return;
+    const err = form.querySelector('#addr-error');
+    const v = form.address.value.trim();
+    if (v && !validEmail(v)) {
+      err.textContent = 'That doesn’t look like an email address.';
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    await store.save('Settings', { id: 'reminderAddress', value: v });
+    reminders.at = 0;
+    toast(v ? 'Reminders will go to ' + v + '.' : 'Removed the address, so no reminder emails go out.');
+  },
   act: {
+    async 'toggle-setting'(el) {
+      const key = el.dataset.key;
+      const on = !model.settingBool(key);
+      await store.save('Settings', { id: key, value: on ? 'TRUE' : 'FALSE' });
+      if (key === 'remindersOn') toast(on ? 'Reminder emails are on.' : 'Reminder emails are paused.');
+      else toast('Saved. Your other devices get it at their next sync.');
+    },
+    async 'test-email'(el) {
+      el.disabled = true;
+      try {
+        if (store.pendingCount()) await sync.syncNow();
+        const r = await sync.sendTestReminder();
+        toast('Test email sent to ' + r.sentTo + '. Try its Snooze button.', { ms: 6000 });
+      } catch (err) {
+        toast(err.message, { warn: true, ms: 7000 });
+      } finally {
+        el.disabled = false;
+      }
+    },
     'reload-devices'() { loadDevices(true); ui.render(); },
     async revoke(el) {
       const ok = await ask({

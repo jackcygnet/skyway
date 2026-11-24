@@ -184,3 +184,24 @@ export async function refreshHello() {
 export function devicesList() { return authed(creds(), 'devices.list', {}); }
 export function revokeDevice(id) { return authed(creds(), 'devices.revoke', { targetId: id }); }
 export function makeCode(name) { return authed(creds(), 'devices.code', { name }); }
+
+/* ------------------------------------------------------------ reminders */
+
+export function remindersStatus() { return authed(creds(), 'reminders.status', {}); }
+export function sendTestReminder() { return authed(creds(), 'reminders.test', {}); }
+
+/** Asks the brain to email a 6-digit code that resets this device's PIN. */
+export function pinResetCode() { return authed(creds(), 'pin.resetCode', {}); }
+export function pinVerifyCode(code) { return authed(creds(), 'pin.verifyCode', { code }); }
+
+/** True if the brain is at least this version, like '1.2.0'. False if it hasn't said yet. */
+export function brainAtLeast(want) {
+  const have = String(store.meta('brainVersion') || '').split('.').map(Number);
+  const need = String(want).split('.').map(Number);
+  if (!have.length || isNaN(have[0])) return false;
+  for (let i = 0; i < need.length; i++) {
+    const a = have[i] || 0, b = need[i] || 0;
+    if (a !== b) return a > b;
+  }
+  return true;
+}

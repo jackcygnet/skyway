@@ -19,11 +19,14 @@
 <link rel="preload" href="fonts/inter-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/app.css">
 <script type="module" src="js/main.js"></script>
+<script src="js/boot-check.js" defer></script>
 </head>
 <body>
-<div id="app"><div class="bare"><div class="onb center"><div class="spinner" aria-label="Loading"></div></div></div></div>
+<div id="app"><div class="bare"><div class="onb center"><div class="spinner" aria-label="Loading"></div>
+<noscript><p class="muted">Skyway needs JavaScript. If you use a script blocker, allow this site, then reload.</p></noscript>
+<p id="boot-help" class="muted" hidden>Skyway is taking a while to start. A script blocker may be stopping it, or a file may be missing. Press F12 and look at the Console for red lines.</p>
+</div></div></div>
 <div id="toasts" aria-live="polite"></div>
 <div id="modal"></div>
-<noscript><p>Skyway needs JavaScript turned on.</p></noscript>
 </body>
 </html>

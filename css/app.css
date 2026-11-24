@@ -603,3 +603,22 @@ small.late { color: var(--attn) !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ------------------------------------------------------------- step 3 */
+
+.toast.has-action { display: flex; align-items: center; gap: 16px; pointer-events: auto; padding-right: 10px; }
+.toast-action { flex: none; background: transparent; border: 0; color: #B9C6F2; font: inherit; font-weight: 600; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.toast-action:hover { background: rgba(255, 255, 255, 0.12); }
+.round-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.addr-form { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 12px; border-top: 1px solid var(--line3); }
+.addr-form .field > span { font-size: 14px; font-weight: 600; }
+.inline-input { display: flex; gap: 8px; align-items: center; }
+.inline-input input { flex: 1; min-width: 0; }
+.inline-input .btn { flex: none; min-height: 44px; }
+.rem-status { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; font-size: 14px; line-height: 1.45; }
+.rem-status > span:first-child { flex: none; display: flex; margin-top: 1px; }
+.rem-status.ok > span:first-child { color: var(--accent); }
+.rem-status.warn > span:first-child { color: var(--attn); }
+.rem-status.quiet > span:first-child { color: var(--muted); }
+.code-sent { font-size: 13px; color: var(--muted2); }
+.parts .row .main small { white-space: normal; overflow: visible; text-overflow: clip; }

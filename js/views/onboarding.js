@@ -248,6 +248,26 @@ export const lockView = {
 
 /* -------------------------------------------------------------- reset PIN */
 
+// The emailed code: asked for here, checked by the brain (it allows 5 tries).
+const pinMail = { sent: false, to: '', busy: false, error: '', code: '' };
+
+function pinMailCard() {
+  if (!sync.brainAtLeast('1.2.0')) return '';
+  return h`<div class="or"><span>or</span></div>
+    <form class="card stack" data-form="pin-mail">
+      <h2>Get a code by email</h2>
+      ${pinMail.sent ? h`<p class="code-sent">Sent to ${pinMail.to}. It works for 15 minutes.</p>
+        <label class="field"><span>6-digit code</span>
+          <input name="code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" spellcheck="false" value="${pinMail.code}"></label>
+        <p class="error" id="pinmail-error" ${pinMail.error ? '' : 'hidden'}>${pinMail.error}</p>
+        <button class="btn block" type="submit" ${pinMail.busy ? 'disabled' : ''}>Reset PIN</button>
+        <button class="link" type="button" data-act="send-pin-mail" ${pinMail.busy ? 'disabled' : ''}>Send a new code</button>`
+    : h`<p class="muted small">Skyway emails a code to your reminder address. You need to be online.</p>
+        <p class="error" id="pinmail-error" ${pinMail.error ? '' : 'hidden'}>${pinMail.error}</p>
+        <button class="btn secondary block" type="button" data-act="send-pin-mail" ${pinMail.busy ? 'disabled' : ''}>Email me a code</button>`}
+    </form>`;
+}
+
 export const resetView = {
   id: 'reset', chrome: 'bare', live: false,
   title: () => 'Reset your PIN',
@@ -265,6 +285,7 @@ export const resetView = {
         <p class="error" id="reset-error" hidden></p>
         <button class="btn block" type="submit">Reset PIN</button>
       </form>
+      ${pinMailCard()}
       <div class="or"><span>or</span></div>
       <div class="card stack">
         <h2>Start over on this device</h2>
@@ -275,6 +296,7 @@ export const resetView = {
     </div>`;
   },
   async submit(form) {
+    if (form.dataset.form === 'pin-mail') return checkMailedCode(form);
     const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     const ok = await lock.checkRecovery(form.code.value);
@@ -289,7 +311,23 @@ export const resetView = {
   act: {
     cancel() {
       ui.resetting = false;
+      Object.assign(pinMail, { sent: false, to: '', busy: false, error: '', code: '' });
       ui.render();
+    },
+    async 'send-pin-mail'() {
+      pinMail.busy = true;
+      pinMail.error = '';
+      ui.render();
+      try {
+        const r = await sync.pinResetCode();
+        Object.assign(pinMail, { sent: true, to: r.sentTo || 'your reminder address', code: '' });
+        toast('Code sent. Check your email.');
+      } catch (err) {
+        pinMail.error = err.message;
+      } finally {
+        pinMail.busy = false;
+        ui.render();
+      }
     },
     async ['start-over']() {
       const lost = store.pendingCount();
@@ -306,6 +344,32 @@ export const resetView = {
     }
   }
 };
+
+async function checkMailedCode(form) {
+  const code = String(form.code ? form.code.value : '').replace(/\D/g, '');
+  if (code.length !== 6) {
+    pinMail.error = 'The code is 6 digits.';
+    ui.render();
+    return;
+  }
+  pinMail.busy = true;
+  pinMail.error = '';
+  pinMail.code = code;
+  ui.render();
+  try {
+    await sync.pinVerifyCode(code);
+    Object.assign(pinMail, { sent: false, to: '', busy: false, error: '', code: '' });
+    // Same as the recovery code: the old PIN stays until a new one is chosen.
+    ui.resetting = false;
+    ui.resettingPin = true;
+    ui.render();
+  } catch (err) {
+    pinMail.busy = false;
+    pinMail.error = err.message;
+    if (err.code === 'code_expired' || err.code === 'code_locked') pinMail.sent = false;
+    ui.render();
+  }
+}
 
 /* --------------------------------------------------------- first download */
 

@@ -282,13 +282,30 @@ appEl.addEventListener('focusout', () => {
 
 const toastsEl = document.getElementById('toasts');
 
+/** A short message at the bottom. opts: { warn, ms, action: { label, fn } } (a button such as Undo). */
 export function toast(message, opts) {
+  const o = opts || {};
   const el = document.createElement('div');
-  el.className = 'toast' + (opts && opts.warn ? ' warn' : '');
-  el.textContent = message;
+  el.className = 'toast' + (o.warn ? ' warn' : '') + (o.action ? ' has-action' : '');
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  const ms = o.ms || (o.action ? 7000 : 3200);
+  if (o.action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = o.action.label;
+    btn.addEventListener('click', () => {
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 300);
+      Promise.resolve().then(o.action.fn).catch((err) => toast(err && err.message ? err.message : String(err), { warn: true }));
+    }, { once: true });
+    el.appendChild(btn);
+  }
   toastsEl.appendChild(el);
-  setTimeout(() => el.classList.add('out'), (opts && opts.ms) || 3200);
-  setTimeout(() => el.remove(), ((opts && opts.ms) || 3200) + 400);
+  setTimeout(() => el.classList.add('out'), ms);
+  setTimeout(() => el.remove(), ms + 400);
 }
 
 const modalEl = document.getElementById('modal');

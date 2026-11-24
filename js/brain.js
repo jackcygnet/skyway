@@ -2,7 +2,7 @@
 // Requests go as text/plain JSON: Apps Script can't answer the extra "pre-check"
 // request browsers send first for application/json.
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 export class BrainError extends Error {
   constructor(code, message) {
