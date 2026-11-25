@@ -5,7 +5,7 @@
 import * as store from './store.js';
 import {
   parseCadence, addCadence, ymdOf, todayYmd, addDays, daysBetween, fmtDate, fmtDay,
-  lastNameKey, normalizeEmail, parseYmd
+  lastNameKey, normalizeEmail, parseYmd, mailboxKey, emailDomain
 } from './util.js';
 
 const cache = new Map();
@@ -36,7 +36,8 @@ export const DEFAULTS = {
   'cadence.On file': 'none', overdueNudgeDays: '14', replyOwedDays: '3', briefingsEnabled: 'TRUE',
   briefingHour: '7', largeEventSize: '9', recurringEventsCount: 'FALSE', skipBulk: 'TRUE',
   overrideLabel: 'Skyway', lockMinutes: '5', healthQuietDays: '2', weeklyBackup: 'TRUE', brainUrl: '', appUrl: '',
-  notDuplicates: ''
+  notDuplicates: '', gmailOn: 'TRUE', myAddresses: '',
+  replyWords: 'let me know; can you; could you; would you; are you free; are you available; when works; what works; does that work; your thoughts; what do you think; please send; please confirm; please reply; get back to me; hear back'
 };
 
 export function setting(key) {
@@ -183,8 +184,20 @@ export function dueInfo(c) {
   return { due: r.due, days, overdue: days < 0, snoozedUntil: r.snoozedUntil && r.snoozedUntil > today ? r.snoozedUntil : null };
 }
 
+/**
+ * Whether an email waiting on your reply shows as "Reply owed" yet. One you
+ * marked yourself shows right away; one Skyway read from your mail waits
+ * replyOwedDays, so you have time to answer before it's flagged.
+ */
+export function replyOwedShows(i) {
+  if (!i || i.replyStatus !== 'Reply owed') return false;
+  if (i.source !== 'Gmail' && i.source !== 'Outlook') return true;
+  const t = Date.parse(i.occurredAt || '');
+  return isNaN(t) || Date.now() - t >= settingNum('replyOwedDays') * 86400000;
+}
+
 export function replyOwedFor(contactId) {
-  return interactionsOf(contactId).find((i) => i.replyStatus === 'Reply owed') || null;
+  return interactionsOf(contactId).find(replyOwedShows) || null;
 }
 
 /** The short status shown beside a person's name. tone: late, soon, ok, new or quiet. */
@@ -334,7 +347,7 @@ export function eventMode() {
 /* -------------------------------------------------------------- duplicates */
 
 function normName(s) {
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -395,6 +408,99 @@ export function notDuplicateKeys() {
 
 export function duplicateOf(id) {
   return duplicatePairs().find((p) => p.a.id === id || p.b.id === id) || null;
+}
+
+/* ------------------------------------------------------------ review queue */
+
+/** Contacts by every address they have, the way the brain matches them. */
+export function contactByEmail(email) {
+  const k = mailboxKey(email);
+  if (!k) return null;
+  return memo('cbe', () => {
+    const m = new Map();
+    people().forEach((c) => (c.emails || []).forEach((e) => {
+      const key = mailboxKey(e);
+      if (key && !m.has(key)) m.set(key, c);
+    }));
+    return m;
+  }).get(k) || null;
+}
+
+/**
+ * New addresses waiting for you, newest first. One that's already on a
+ * contact (you added them some other way) is left out; the brain marks it
+ * Linked at its next check.
+ */
+export function reviewSenders() {
+  return memo('review-senders', () => live('ReviewQueue')
+    .filter((r) => (r.status || 'Pending') === 'Pending' && r.email && !contactByEmail(r.email))
+    .sort((a, b) => String(b.lastSeenAt || b.createdAt || '').localeCompare(String(a.lastSeenAt || a.createdAt || ''))));
+}
+
+/** Emails from contacts where Skyway couldn't tell whether you owe a reply, newest first. */
+export function unsureEmails() {
+  return memo('unsure', () => live('Interactions')
+    .filter((i) => i.replyStatus === 'Unsure' && getLive('Contacts', i.contactId))
+    .sort(byOccurredDesc));
+}
+
+export function reviewCounts() {
+  return memo('review-counts', () => {
+    const senders = reviewSenders().length;
+    const unsure = unsureEmails().length;
+    const dupes = duplicatePairs().length;
+    return { senders, unsure, dupes, total: senders + unsure + dupes };
+  });
+}
+
+/** Rows on the Filters tab of one kind: Ignore sender, Ignore domain or Always allow. Newest first. */
+export function filtersOf(kind) {
+  return live('Filters').filter((f) => f.kind === kind && f.value)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+/** The filter rule that applies to an address, as the brain decides it: 'ignore', 'allow' or ''. */
+export function filterFor(email) {
+  const k = mailboxKey(email);
+  const domain = emailDomain(k);
+  let best = null;
+  live('Filters').forEach((f) => {
+    if (!f.value || !['Ignore sender', 'Ignore domain', 'Always allow'].includes(f.kind)) return;
+    const v = String(f.value).trim().toLowerCase().replace(/^@/, '');
+    const exact = v.includes('@');
+    const hit = exact ? mailboxKey(v) === k : (domain === v || domain.endsWith('.' + v));
+    if (!hit) return;
+    const at = Date.parse(f.updatedAt || f.createdAt || '') || 0;
+    if (!best || (exact && !best.exact) || (exact === best.exact && at >= best.at)) best = { exact, at, f };
+  });
+  return best ? (best.f.kind === 'Always allow' ? 'allow' : 'ignore') : '';
+}
+
+/**
+ * What Skyway logged by itself lately, for Today: emails from Gmail (one
+ * line per email, even when several contacts were on it) and new senders
+ * it sent to the review queue. Newest first.
+ */
+export function autoLogged(days, limit) {
+  const since = Date.now() - days * 86400000;
+  const items = [];
+  const groups = new Set();
+  live('Interactions').forEach((i) => {
+    if (i.source !== 'Gmail' && i.source !== 'Outlook' && i.source !== 'Calendar') return;
+    const t = Date.parse(i.occurredAt || '');
+    if (isNaN(t) || t < since) return;
+    if (i.groupId) {
+      if (groups.has(i.groupId)) return;
+      groups.add(i.groupId);
+    }
+    const c = getLive('Contacts', i.contactId);
+    if (c) items.push({ kind: 'logged', at: i.occurredAt, i, c });
+  });
+  reviewSenders().forEach((r) => {
+    const t = Date.parse(r.lastSeenAt || '');
+    if (!isNaN(t) && t >= since) items.push({ kind: 'queued', at: r.lastSeenAt, r });
+  });
+  return items.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, limit || 5);
 }
 
 /* ------------------------------------------------------------------- misc */

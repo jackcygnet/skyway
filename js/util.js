@@ -268,6 +268,31 @@ export function normalizeEmail(s) { return String(s || '').trim().toLowerCase();
 
 export function validEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim()); }
 
+/**
+ * One spelling per mailbox, the way the brain matches addresses: lower case,
+ * no "+tag", and for Gmail no dots (j.doe@gmail.com is jdoe@googlemail.com).
+ */
+export function mailboxKey(s) {
+  const e = String(s || '').trim().toLowerCase().replace(/^mailto:/, '').replace(/^<|>$/g, '');
+  const at = e.lastIndexOf('@');
+  if (at < 1 || at === e.length - 1 || /\s/.test(e)) return '';
+  let local = e.slice(0, at).replace(/\+.*$/, '');
+  let domain = e.slice(at + 1);
+  if (domain === 'googlemail.com') domain = 'gmail.com';
+  if (domain === 'gmail.com') local = local.replace(/\./g, '');
+  return local ? local + '@' + domain : '';
+}
+
+export function emailDomain(s) {
+  const e = String(s || '').trim().toLowerCase();
+  return e.includes('@') ? e.slice(e.lastIndexOf('@') + 1) : e.replace(/^@/, '');
+}
+
+/** Domains shared by millions of people. Ignoring one of these would hide real people, so the app never offers it. */
+export const SHARED_MAIL_DOMAINS = ['gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com',
+  'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'comcast.net', 'stthomas.edu',
+  'umn.edu', 'wisc.edu'];
+
 export function matchesQuery(fields, q) {
   if (!q) return true;
   const hay = fields.filter(Boolean).join(' \u0001 ').toLowerCase();

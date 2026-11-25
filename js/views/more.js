@@ -1,4 +1,4 @@
-// Skyway app · More (phone): tasks, organizations, settings, sync, lock.
+// Skyway app · More (phone): review queue, tasks, organizations, settings, sync, lock.
 
 import * as store from '../store.js';
 import * as sync from '../sync.js';
@@ -34,6 +34,7 @@ export default {
     return h`<div class="page">
       ${topHead({ title: 'More' })}
       <div class="card list">
+        ${item('#/review', 'inbox', 'Review queue', model.reviewCounts().total ? model.reviewCounts().total + ' to review' : '')}
         ${item('#/tasks', 'list', 'Tasks', c.openTasks ? c.openTasks + ' open' : '')}
         ${item('#/orgs', 'building', 'Organizations', c.orgs || '')}
         ${item('#/settings', 'sliders', 'Settings', '')}

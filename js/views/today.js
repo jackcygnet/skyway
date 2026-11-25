@@ -1,12 +1,12 @@
 // Skyway app · Today: who's due, what's coming up, what you owe.
 
-import * as store from '../store.js';
 import * as model from '../model.js';
 import { ui, toast, syncPill } from '../main.js';
-import { h, fmtHeaderDate, fmtDate, fmtTime, fmtDay, plural, daysBetween, ymdOf, todayYmd, safeUrl } from '../util.js';
+import { h, fmtHeaderDate, fmtDate, fmtTime, fmtDay, fmtAgo, plural, daysBetween, ymdOf, todayYmd, safeUrl, firstName } from '../util.js';
 import { icon } from '../icons.js';
 import * as actions from '../actions.js';
 import { avatar, statusChip, dateBadge, personRow, peopleCount } from './parts.js';
+import { reviewSummary } from './review.js';
 
 const DUE_AHEAD = 7;
 
@@ -91,20 +91,47 @@ function dueTableDesktop() {
   </section>`;
 }
 
-function duplicatesCard(desktop) {
-  const pairs = model.duplicatePairs();
-  if (!pairs.length) return '';
-  return h`<section class="${desktop ? 'card' : 'block'}">
-    <div class="block-head"><h2>Possible duplicates</h2><span class="muted small">${pairs.length}</span></div>
-    <div class="${desktop ? 'list' : 'card list'}">
-      ${pairs.slice(0, 3).map((p) => h`<div class="row dupe">
-        <span class="main"><b>${p.a.name} · ${p.b.name}</b><small>${p.reason}</small></span>
-        <span class="row-actions">
-          <a class="btn small secondary" href="#/merge?a=${p.a.id}&b=${p.b.id}">Compare</a>
-          <button class="btn small ghost" data-act="not-dupe" data-key="${p.key}">Not the same</button>
-        </span>
-      </div>`)}
-    </div>
+/** New senders, emails to sort and possible duplicates, all in the review queue. */
+function reviewCard(desktop) {
+  const n = model.reviewCounts();
+  if (!n.total) return '';
+  if (desktop) {
+    return h`<section class="card">
+      <div class="card-head"><h2>${icon('inbox', 18)} Review queue</h2><span class="muted small">${n.total}</span></div>
+      <p class="card-body">${reviewSummary(true)}</p>
+      <a class="btn block outline" href="#/review">Open review queue</a>
+    </section>`;
+  }
+  return h`<section class="block">
+    <div class="block-head"><h2>Review queue</h2></div>
+    <div class="card list"><a class="row link" href="#/review"><span class="avatar square sm">${icon('inbox', 18)}</span>
+      <span class="main"><b>${reviewSummary(false)}</b><small>Add, link or ignore new senders</small></span>
+      <span class="chev">${icon('chevronRight', 18)}</span></a></div>
+  </section>`;
+}
+
+/** What Skyway logged from your email by itself this week, so you can add notes. */
+function autoCard() {
+  const items = model.autoLogged(7, 5);
+  if (!items.length) return '';
+  return h`<section class="card">
+    <div class="card-head"><h2>${icon('mail', 18)} Logged automatically</h2><span class="muted small">From Gmail</span></div>
+    <div class="list">${items.map((x) => {
+    if (x.kind === 'queued') {
+      const name = x.r.displayName || x.r.email;
+      return h`<div class="row auto"><span class="avatar square sm">${icon('mail', 16)}</span>
+        <span class="main"><b>Email from ${name}</b><small>Not a contact yet · sent to the review queue</small></span>
+        <span class="muted small">${fmtAgo(x.at)}</span>
+        <a class="btn small secondary" href="#/review">Review</a></div>`;
+    }
+    const i = x.i;
+    const who = firstName(x.c.name) || x.c.name;
+    const title = i.direction === 'Outbound' ? 'Email to ' + x.c.name : (i.direction === 'Inbound' ? 'Email from ' + x.c.name : 'Email with ' + x.c.name);
+    return h`<div class="row auto"><span class="avatar square sm">${icon('mail', 16)}</span>
+      <a class="main" href="#/people/${x.c.id}"><b>${title}</b><small>${[i.subject, i.source].filter(Boolean).join(' · ')}</small></a>
+      <span class="muted small">${fmtAgo(x.at)}</span>
+      <a class="btn small secondary" href="#/log?iid=${i.id}" aria-label="Add notes about the email with ${who}">Add notes</a></div>`;
+  })}</div>
   </section>`;
 }
 
@@ -116,11 +143,13 @@ function replyCard(desktop) {
     <div class="${desktop ? 'list' : 'card list'}">
       ${items.slice(0, 4).map(({ c, i }) => {
     const days = daysBetween(ymdOf(new Date(i.occurredAt)), todayYmd());
+    const link = safeUrl(i.link);
+    const where = /^https:\/\/mail\.google\.com\//.test(link) ? 'Reply in Gmail' : 'Reply';
     return h`<div class="row reply">
         ${avatar(c)}
         <a class="main" href="#/people/${c.id}"><b>${c.name}</b><small>${i.subject || i.summary || 'Waiting on your reply'} · ${fmtDate(i.occurredAt)}</small></a>
         ${desktop ? h`<span class="row-actions">
-          ${safeUrl(i.link) ? h`<a class="btn small outline" href="${safeUrl(i.link)}" target="_blank" rel="noopener">Reply</a>` : ''}
+          ${link ? h`<a class="btn small outline" href="${link}" target="_blank" rel="noopener">${where}</a>` : ''}
           <button class="btn small secondary" data-act="no-reply" data-id="${i.id}">No reply needed</button></span>`
     : h`<span class="muted small">${plural(Math.max(days, 0), 'day')}</span>`}
       </div>`;
@@ -188,9 +217,9 @@ function renderPhone() {
     ${eventModeCard(false)}
     ${comingUpCard(false)}
     ${dueBlockPhone()}
-    ${duplicatesCard(false)}
     ${replyCard(false)}
     ${tasksCard(false)}
+    ${reviewCard(false)}
   </div>`;
 }
 
@@ -210,12 +239,13 @@ function renderDesktop() {
       <div class="stack">
         ${none ? welcome() : ''}
         ${dueTableDesktop()}
-        ${duplicatesCard(true)}
+        ${autoCard()}
       </div>
       <aside class="stack">
         ${comingUpCard(true)}
         ${replyCard(true)}
         ${tasksCard(true)}
+        ${reviewCard(true)}
         ${eventModeCard(true)}
       </aside>
     </div>
@@ -232,13 +262,9 @@ export default {
   },
   act: {
     'task-done': (el) => completeTask(el.dataset.id),
-    async 'not-dupe'(el) {
-      await actions.dismissDuplicate(el.dataset.key);
-      toast('Got it. They’re different people.');
-    },
     async 'no-reply'(el) {
-      await store.save('Interactions', { id: el.dataset.id, replyStatus: 'No reply needed' });
-      toast('Marked no reply needed');
+      const undo = await actions.setReplyStatus(el.dataset.id, 'No reply needed');
+      if (undo) toast('Marked no reply needed', { action: { label: 'Undo', fn: () => actions.undoReplyStatus(undo) } });
     }
   }
 };

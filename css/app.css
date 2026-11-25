@@ -622,3 +622,53 @@ small.late { color: var(--attn) !important; }
 .rem-status.quiet > span:first-child { color: var(--muted); }
 .code-sent { font-size: 13px; color: var(--muted2); }
 .parts .row .main small { white-space: normal; overflow: visible; text-overflow: clip; }
+
+/* ------------------------------------------------------------- step 4 */
+
+.row-actions.wrap { flex-wrap: wrap; flex: initial; }
+.count { min-width: 24px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--soft); color: var(--muted2); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.qsection .block-head { justify-content: flex-start; margin-bottom: 8px; }
+.qcard { display: flex; flex-direction: column; gap: 8px; }
+.qhead { display: flex; align-items: center; gap: 12px; min-width: 0; color: inherit; }
+a.qhead:hover { color: inherit; }
+.qhead .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: inherit; }
+.qhead .main b { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qhead .main small { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qsubject { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.qsubject::before { content: '“'; }
+.qsubject::after { content: '”'; }
+.qquote { margin: 0; padding: 10px 12px; border-left: 3px solid var(--line2); border-radius: 0 10px 10px 0; background: var(--ground); font-size: 14px; color: var(--muted2); overflow-wrap: anywhere; }
+.qquote::before { content: '“'; }
+.qquote::after { content: '”'; }
+.qmatch { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--accent-tint); color: var(--accent-dark); font-size: 14px; }
+.qmatch a { font-weight: 600; }
+.qaddr { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.dupe-pair { display: flex; flex-direction: column; gap: 10px; }
+.ignore-choices { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: var(--ground); }
+.ignore-choices .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--muted2); font-size: 14px; }
+.strip > span:nth-child(2) { flex: 1; min-width: 0; }
+.strip b { color: var(--ink); font-weight: 600; }
+.strip:hover { color: var(--muted2); border-color: var(--line2); }
+.setrow.first { border-top: 0; }
+.more-link { min-height: 44px; }
+.reply-ask { display: inline-flex; align-items: center; gap: 6px; }
+.row.auto .main b { white-space: normal; }
+.row.auto .btn { flex: none; }
+.addr-form textarea { min-height: 120px; font-size: 15px; }
+.addr-form .row-actions { margin-top: 4px; }
+
+@media (min-width: 900px) {
+  .dupe-pair { flex-direction: row; }
+  .dupe-pair .qhead { flex: 1; }
+}
+.card.list.wrap .row .main small { white-space: normal; overflow: visible; text-overflow: clip; }
+.iconbtn.spin svg { animation: spin 0.9s linear infinite; }
+.iconbtn:disabled { opacity: 0.6; cursor: default; }
+
+@media (min-width: 900px) {
+  /* Reply owed on Today: the buttons go under the name, so neither gets squeezed. */
+  .card .list > .row.reply { flex-wrap: wrap; row-gap: 8px; }
+  .row.reply .main { flex-basis: calc(100% - 52px); }
+  .row.reply .row-actions { margin-left: 52px; }
+}

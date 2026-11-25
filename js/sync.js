@@ -190,6 +190,14 @@ export function makeCode(name) { return authed(creds(), 'devices.code', { name }
 export function remindersStatus() { return authed(creds(), 'reminders.status', {}); }
 export function sendTestReminder() { return authed(creds(), 'reminders.test', {}); }
 
+/* ---------------------------------------------------------------- Gmail */
+
+/** Whether the brain is reading Gmail, its last check, and the bulk mail it skipped this week. */
+export function gmailStatus() { return authed(creds(), 'gmail.status', {}); }
+
+/** Runs a Gmail check now. The very first one looks back 30 days, so it can take a minute or two. */
+export function gmailCheck() { return authed(creds(), 'gmail.check', {}, 180000); }
+
 /** Asks the brain to email a 6-digit code that resets this device's PIN. */
 export function pinResetCode() { return authed(creds(), 'pin.resetCode', {}); }
 export function pinVerifyCode(code) { return authed(creds(), 'pin.verifyCode', { code }); }

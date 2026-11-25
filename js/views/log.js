@@ -34,6 +34,8 @@ function init(route) {
     newNames: {},
     type: it ? it.type || 'Other' : (ev ? 'Event' : 'Call'),
     direction: it ? it.direction || '' : 'Outbound',
+    // An email someone else sent that this person was copied on has no direction. Editing keeps it that way.
+    blankDirection: !!(it && it.type === 'Email' && !it.direction),
     whenIso: it ? it.occurredAt : '',
     changingWhen: false,
     subject: it ? it.subject || '' : '',
@@ -170,7 +172,7 @@ async function save() {
   const fields = {
     occurredAt, type: draft.type, subject: draft.subject.trim(), notes: draft.notes.trim(),
     eventId: ev ? ev.id : '', countsAsCheckIn: !!draft.counts,
-    direction: draft.type === 'Email' ? (draft.direction || 'Outbound') : ''
+    direction: draft.type === 'Email' ? (draft.direction || (draft.blankDirection ? '' : 'Outbound')) : ''
   };
   let firstInteractionId = '';
   if (draft.iid) {

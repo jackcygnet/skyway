@@ -4,7 +4,7 @@
 // reaches your devices: they download it in the background, then show
 // "A new version of Skyway is ready".
 
-const BUILD = '1.1.0-5fc698d465';
+const BUILD = '1.2.0-f6f34ad256';
 const CACHE = 'skyway-' + BUILD;
 const FILES = [
   './',
@@ -16,7 +16,7 @@ const FILES = [
   'js/views/parts.js', 'js/views/today.js', 'js/views/people.js', 'js/views/contactForm.js',
   'js/views/log.js', 'js/views/tasks.js', 'js/views/events.js', 'js/views/orgs.js',
   'js/views/merge.js', 'js/views/more.js', 'js/views/settings.js', 'js/views/syncView.js',
-  'js/views/onboarding.js',
+  'js/views/onboarding.js', 'js/views/review.js',
   'fonts/inter-latin-400-normal.woff2', 'fonts/inter-latin-500-normal.woff2', 'fonts/inter-latin-600-normal.woff2',
   'fonts/inter-latin-ext-400-normal.woff2', 'fonts/inter-latin-ext-500-normal.woff2', 'fonts/inter-latin-ext-600-normal.woff2',
   'fonts/space-grotesk-latin-500-normal.woff2', 'fonts/space-grotesk-latin-600-normal.woff2',

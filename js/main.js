@@ -15,6 +15,7 @@ import { tasksView, taskForm } from './views/tasks.js';
 import { eventsView, eventView, eventForm } from './views/events.js';
 import { orgsView, orgView, orgForm } from './views/orgs.js';
 import mergeView from './views/merge.js';
+import { reviewView, linkView, filtersView } from './views/review.js';
 import moreView from './views/more.js';
 import { settingsView, addDeviceView, changePinView, recoveryView } from './views/settings.js';
 import syncView from './views/syncView.js';
@@ -85,6 +86,8 @@ function resolve(route) {
       if (b === 'new' || c === 'edit') return orgForm;
       return b ? orgView : orgsView;
     case 'merge': return mergeView;
+    case 'review': return b === 'link' ? linkView : reviewView;
+    case 'filters': return filtersView;
     case 'more': return ui.desktop() ? settingsView : moreView;
     case 'settings':
       if (b === 'add-device') return addDeviceView;
@@ -195,6 +198,7 @@ function sidebar(active) {
       ${item('people', '#/people', 'people', 'People')}
       ${item('orgs', '#/orgs', 'building', 'Organizations')}
       ${item('events', '#/events', 'calendar', 'Events')}
+      ${item('review', '#/review', 'inbox', 'Review queue', model.reviewCounts().total || '')}
       ${item('tasks', '#/tasks', 'list', 'Tasks', model.openTasks().length || '')}
     </nav>
     <div class="side-foot">
@@ -207,7 +211,9 @@ function sidebar(active) {
   </aside>`;
 }
 
-function tabbar(active) {
+function tabbar(navKey) {
+  // The review queue opens from More on a phone.
+  const active = navKey === 'review' ? 'more' : navKey;
   const tab = (key, href, ic, label) => h`<a class="tab ${active === key ? 'on' : ''}" href="${href}">${icon(ic, 22)}<span>${label}</span></a>`;
   return h`<nav class="tabbar" aria-label="Main">
     ${tab('today', '#/today', 'home', 'Today')}

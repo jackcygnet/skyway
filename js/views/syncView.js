@@ -58,7 +58,7 @@ function waitingList() {
   </section>`;
 }
 
-const PART_NAMES = { reminders: 'Reminder emails', collector: 'Desktop collector' };
+const PART_NAMES = { reminders: 'Reminder emails', collector: 'Desktop collector', gmail: 'Gmail check' };
 
 /**
  * A part of Skyway that reports in (the reminder timer, later the desktop
@@ -69,13 +69,15 @@ export function healthPart(r) {
   const quietDays = model.settingNum('healthQuietDays');
   const last = r.lastCheckInAt ? Date.parse(r.lastCheckInAt) : 0;
   const days = last ? (Date.now() - last) / 86400000 : Infinity;
-  const resting = r.id === 'reminders' && (!model.settingBool('remindersOn') || !model.setting('reminderAddress'));
+  const resting = (r.id === 'reminders' && (!model.settingBool('remindersOn') || !model.setting('reminderAddress'))) ||
+    (r.id === 'gmail' && !model.settingBool('gmailOn'));
   const name = PART_NAMES[r.id] || r.id;
   const when = last ? fmtAgo(r.lastCheckInAt) : '';
+  if (resting && r.id === 'gmail') return { ok: true, idle: true, name, detail: 'Off. Turn it on in Settings, under Email.', when };
   if (resting) return { ok: true, idle: true, name, detail: model.settingBool('remindersOn') ? 'No address yet, so nothing is sent' : 'Paused', when };
   if (days > quietDays) {
     return { ok: false, name, when, detail: 'Hasn’t checked in for ' + plural(Math.floor(days), 'day') + '. ' +
-      (r.id === 'reminders' ? 'In the Sheet, choose Skyway > Check setup.' : 'Check that it’s running.') };
+      (r.id === 'reminders' || r.id === 'gmail' ? 'In the Sheet, choose Skyway > Check setup.' : 'Check that it’s running.') };
   }
   return { ok: r.status === 'OK', name, detail: r.status === 'OK' ? (r.details || 'OK') : (r.lastError || r.status), when };
 }

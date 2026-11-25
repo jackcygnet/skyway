@@ -1,4 +1,4 @@
-// Skyway app · Settings: check-in tiers, reminder emails, security, devices, your data.
+// Skyway app · Settings: check-in tiers, reminder emails, email, security, devices, your data.
 // Also the screens for adding a device, changing the PIN, and a new
 // recovery code.
 
@@ -13,6 +13,7 @@ import { qrSvg } from '../qr.js';
 import { APP_VERSION } from '../brain.js';
 import { topHead, subHead, sheetHead, keypad, pinMachine, listenKeys, peopleCount } from './parts.js';
 import { syncSummary } from './more.js';
+import { gmail, loadGmailStatus, checkGmailNow, checkWords } from './review.js';
 
 /* -------------------------------------------------------------- devices */
 // The device list lives in the Sheet's Devices tab, which never syncs, so
@@ -129,6 +130,90 @@ function remindersCard() {
   </section>`;
 }
 
+/* ---------------------------------------------------------------- email */
+// Reading Gmail happens in the brain every 15 minutes. These settings sync
+// like any other; the line at the top comes from the brain's last check.
+
+const wordsUi = { editing: false };
+
+/** One line saying whether Gmail reading works, from the settings here and the brain's last report. */
+function gmailState() {
+  const st = gmail.status;
+  if (!sync.brainAtLeast('1.3.0')) {
+    return { tone: 'warn', chip: 'Needs update', text: 'Reading Gmail needs brain version 1.3.0. Follow step 4 of the setup guide to update it.' };
+  }
+  if (!model.settingBool('gmailOn')) return { tone: 'quiet', chip: 'Off', text: 'Off. Skyway isn’t reading Gmail. Nothing already logged is lost.' };
+  if (gmail.error) return { tone: 'quiet', chip: 'On', text: gmail.error };
+  if (!st) return { tone: 'quiet', chip: 'On', text: 'Asking the brain…' };
+  if (st.problem) return { tone: 'warn', chip: 'Problem', text: st.problem.message };
+  if (st.timer === false) return { tone: 'warn', chip: 'Timer off', text: 'The brain’s 15-minute Gmail timer is off. In the Sheet, choose Skyway > Set up or repair the Sheet.' };
+  if (!st.started) return { tone: 'quiet', chip: 'On', text: 'Waiting for the first check. It logs the last 30 days of email with your contacts.' };
+  const h0 = st.health;
+  const when = st.lastCheckAt ? fmtAgo(st.lastCheckAt) : '';
+  const today = st.today ? 'Today: ' + plural(st.today.logged, 'email') + ' logged, ' + plural(st.today.queued, 'new sender') + ' for review.' : '';
+  const warn = h0 && h0.status !== 'OK';
+  return { tone: warn ? 'warn' : 'ok', chip: warn ? 'Problem' : 'On',
+    text: (st.address ? 'Reading ' + st.address + ', read only. ' : '') + (when ? 'Last check ' + when + '. ' : '') + (warn ? (h0.lastError || '') : today) };
+}
+
+function filtersSummary() {
+  const n = (k) => model.filtersOf(k).length;
+  const parts = [model.settingBool('skipBulk') ? 'Bulk mail skipped' : 'Bulk mail not skipped'];
+  const s = n('Ignore sender'), d = n('Ignore domain');
+  if (s || d) parts.push([s ? plural(s, 'sender') : '', d ? plural(d, 'domain') : ''].filter(Boolean).join(' and ') + ' ignored');
+  return parts.join('; ');
+}
+
+function wordsList() {
+  return model.setting('replyWords').split(';').map((w) => w.trim()).filter(Boolean);
+}
+
+function wordsSummary() {
+  const list = wordsList();
+  return 'Questions, ' + list.slice(0, 2).map((w) => '“' + w + '”').join(', ') + (list.length > 2 ? '…' : '');
+}
+
+function labelLine() {
+  const st = gmail.status;
+  if (!st || st.labelFound === null || st.labelName !== model.setting('overrideLabel')) return 'Give an email this Gmail label to log it anyway';
+  return st.labelFound ? 'Found in Gmail. Emails you give it are logged anyway.' : 'Not in Gmail yet. Make a Gmail label with this name when you need it.';
+}
+
+function emailCard() {
+  const state = gmailState();
+  const ready = sync.brainAtLeast('1.3.0');
+  return h`<section class="card" id="email">
+    <div class="card-head"><h2>Email</h2><span class="chip ${state.tone === 'warn' ? 'late' : (state.tone === 'ok' ? 'soon' : 'quiet')}">${state.chip}</span></div>
+    <div class="rem-status ${state.tone}"><span>${icon(state.tone === 'warn' ? 'alert' : (state.tone === 'ok' ? 'checkCircle' : 'clock'), 18)}</span><span>${state.text}</span></div>
+    ${ready ? h`
+    ${setRow('Read Gmail', 'Logs email with your contacts every 15 minutes. Skyway can’t change or delete your mail.', switchFor('gmailOn', 'Read Gmail'))}
+    ${setRow('Email filters', filtersSummary(), h`<a class="btn small secondary" href="#/filters">Manage</a>`)}
+    ${setRow('Reply owed after', 'How long an email that needs your answer waits before Today flags it',
+    numberSelect('replyOwedDays', 'Reply owed after', [1, 2, 3, 5, 7, 14], (n) => plural(n, 'day')))}
+    ${setRow('Reply-needed words', wordsSummary(), wordsUi.editing ? '' : h`<button class="btn small secondary" data-act="edit-words">Edit</button>`)}
+    ${wordsUi.editing ? h`<form class="addr-form" data-form="reply-words" novalidate>
+      <label class="field"><span>One phrase per line. An email with one of these, or a question mark, needs your reply.</span>
+        <textarea name="words" rows="6" spellcheck="false" data-skip>${wordsList().join('\n')}</textarea></label>
+      <span class="row-actions"><button class="btn small" type="submit">Save</button>
+        <button class="btn small ghost" type="button" data-act="cancel-words">Cancel</button></span>
+    </form>` : ''}
+    <form class="addr-form" data-form="override-label" novalidate>
+      <label class="field"><span>Override label</span>
+        <span class="inline-input"><input type="text" name="label" value="${model.setting('overrideLabel')}" placeholder="Skyway"
+          autocomplete="off" spellcheck="false" data-skip><button class="btn small" type="submit">Save</button></span></label>
+      <p class="hint">${labelLine()}</p>
+    </form>
+    <form class="addr-form" data-form="my-addresses" novalidate>
+      <label class="field"><span>Your other addresses</span>
+        <span class="inline-input"><input type="text" name="addresses" value="${model.setting('myAddresses')}" placeholder="old.address@yahoo.com"
+          autocomplete="off" inputmode="email" spellcheck="false" data-skip><button class="btn small" type="submit">Save</button></span></label>
+      <p class="hint">Separate them with semicolons. Mail between your own addresses is never logged. Your Gmail and reminder address count already.</p>
+    </form>
+    ${setRow('Check Gmail now', 'Reads new mail right away instead of waiting up to 15 minutes',
+      h`<button class="btn small secondary" data-act="check-gmail" ${gmail.checking || !model.settingBool('gmailOn') ? 'disabled' : ''}>${gmail.checking ? 'Checking…' : 'Check now'}</button>`)}` : ''}
+  </section>`;
+}
+
 /* ------------------------------------------------------------- settings */
 
 const LOCK_CHOICES = [1, 2, 5, 10, 15, 30, 60];
@@ -227,14 +312,15 @@ export const settingsView = {
     return h`<div class="page ${desktop ? 'wide' : ''}">
       ${desktop ? topHead({ title: 'Settings' }) : subHead({ title: 'Settings', back: '#/more' })}
       <div class="${desktop ? 'cols2' : 'stack'}">
-        <div class="stack">${desktop ? syncCard() : ''}${tiersCard()}${remindersCard()}${securityCard()}</div>
-        <div class="stack">${devicesCard()}${dataCard()}${aboutCard()}</div>
+        <div class="stack">${desktop ? syncCard() : ''}${tiersCard()}${remindersCard()}${desktop ? '' : emailCard()}${securityCard()}</div>
+        <div class="stack">${desktop ? emailCard() : ''}${devicesCard()}${dataCard()}${aboutCard()}</div>
       </div>
     </div>`;
   },
   mount() {
     loadDevices(false);
     loadReminderStatus(false);
+    loadGmailStatus(false);
   },
   async change(el) {
     const key = el.dataset.setting;
@@ -243,6 +329,31 @@ export const settingsView = {
     toast('Saved. Your other devices get it at their next sync.');
   },
   async submit(form) {
+    if (form.dataset.form === 'reply-words') {
+      const words = String(form.words.value || '').split(/[\n;]+/).map((w) => w.trim().toLowerCase()).filter(Boolean);
+      await store.save('Settings', { id: 'replyWords', value: Array.from(new Set(words)).join('; ') });
+      wordsUi.editing = false;
+      toast(words.length ? 'Saved ' + plural(words.length, 'phrase') + '. They apply to new email.' : 'Saved. Only question marks count now.');
+      return;
+    }
+    if (form.dataset.form === 'override-label') {
+      const v = String(form.label.value || '').trim();
+      await store.save('Settings', { id: 'overrideLabel', value: v });
+      gmail.at = 0;
+      toast(v ? 'Emails with the Gmail label “' + v + '” are logged anyway.' : 'No override label.');
+      return;
+    }
+    if (form.dataset.form === 'my-addresses') {
+      const list = String(form.addresses.value || '').split(/[;,\s]+/).map((x) => x.trim()).filter(Boolean);
+      const bad = list.filter((x) => !validEmail(x));
+      if (bad.length) {
+        toast('“' + bad[0] + '” doesn’t look like an email address.', { warn: true });
+        return;
+      }
+      await store.save('Settings', { id: 'myAddresses', value: list.join('; ') });
+      toast(list.length ? 'Saved. Mail with ' + (list.length === 1 ? 'that address' : 'those addresses') + ' counts as your own.' : 'Saved.');
+      return;
+    }
     if (form.dataset.form !== 'reminder-address') return;
     const err = form.querySelector('#addr-error');
     const v = form.address.value.trim();
@@ -262,7 +373,24 @@ export const settingsView = {
       const on = !model.settingBool(key);
       await store.save('Settings', { id: key, value: on ? 'TRUE' : 'FALSE' });
       if (key === 'remindersOn') toast(on ? 'Reminder emails are on.' : 'Reminder emails are paused.');
+      else if (key === 'gmailOn') toast(on ? 'Gmail reading is on. It starts from now at the next check.' : 'Gmail reading is off.');
       else toast('Saved. Your other devices get it at their next sync.');
+    },
+    'edit-words'() {
+      wordsUi.editing = true;
+      ui.render();
+    },
+    'cancel-words'() {
+      wordsUi.editing = false;
+      ui.render();
+    },
+    async 'check-gmail'() {
+      try {
+        const c = await checkGmailNow();
+        if (c) toast(checkWords(c), { ms: 5000 });
+      } catch (err) {
+        toast(err.message, { warn: true, ms: 7000 });
+      }
     },
     async 'test-email'(el) {
       el.disabled = true;

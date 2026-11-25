@@ -106,11 +106,31 @@ function groupOthers(i) {
     .map((x) => model.getLive('Contacts', x.contactId)).filter(Boolean);
 }
 
+/** For an email: who wrote, and where Skyway read it (Gmail, Outlook). */
+function emailWords(i, c) {
+  if (i.type !== 'Email') return '';
+  const who = firstName(c && c.name) || 'them';
+  const dir = i.direction === 'Inbound' ? 'from ' + who : (i.direction === 'Outbound' ? 'to ' + who : 'with ' + who + ' on it');
+  return 'Email ' + dir + (i.source === 'Gmail' || i.source === 'Outlook' ? ' · ' + i.source : '');
+}
+
+function replyButtons(i) {
+  if (i.replyStatus === 'Unsure') {
+    return h`<span class="reply-ask"><span class="muted small">Reply needed?</span>
+      <button class="btn small secondary" data-act="reply-status" data-id="${i.id}" data-status="Reply owed">Yes</button>
+      <button class="btn small secondary" data-act="reply-status" data-id="${i.id}" data-status="No reply needed">No</button></span>`;
+  }
+  if (i.replyStatus === 'Reply owed') {
+    return h`<button class="btn small secondary" data-act="reply-status" data-id="${i.id}" data-status="No reply needed">No reply needed</button>`;
+  }
+  return '';
+}
+
 function historyEntry(i, c) {
   const ev = i.eventId ? model.getLive('Events', i.eventId) : null;
   const others = groupOthers(i);
   const link = safeUrl(i.link);
-  const meta = [fmtDay(i.occurredAt), i.type || 'Logged'].filter(Boolean).join(' · ');
+  const meta = [fmtDay(i.occurredAt), emailWords(i, c) || i.type || 'Logged'].filter(Boolean).join(' · ');
   return h`<article class="entry">
     <span class="entry-icon">${icon(typeIcon(i.type), 18)}</span>
     <div class="entry-body">
@@ -120,8 +140,9 @@ function historyEntry(i, c) {
       ${i.summary ? h`<p class="text">${i.summary}</p>` : ''}
       ${i.notes ? h`<p class="text">${i.notes}</p>` : ''}
       <div class="entry-foot">
-        ${i.replyStatus ? chip(i.replyStatus, i.replyStatus === 'Reply owed' ? 'late' : 'quiet') : ''}
-        ${i.countsAsCheckIn === false ? chip('Not a check-in', 'quiet') : ''}
+        ${i.replyStatus && i.replyStatus !== 'Unsure' ? chip(i.replyStatus, i.replyStatus === 'Reply owed' && model.replyOwedShows(i) ? 'late' : 'quiet') : ''}
+        ${i.countsAsCheckIn === false && i.replyStatus !== 'Reply owed' && i.replyStatus !== 'Unsure' ? chip('Not a check-in', 'quiet') : ''}
+        ${replyButtons(i)}
         ${link ? h`<a class="ext" href="${link}" target="_blank" rel="noopener">Open ${i.type === 'Email' ? 'email' : 'link'}${icon('external', 14)}</a>` : ''}
         <a class="ext" href="#/log?iid=${i.id}">Edit</a>
       </div>
@@ -407,6 +428,12 @@ const sharedActs = {
     if (!c) return;
     await actions.endSnooze(c);
     toast('Snooze ended. ' + firstName(c.name) + ' shows as due again.');
+  },
+  async 'reply-status'(el) {
+    const undo = await actions.setReplyStatus(el.dataset.id, el.dataset.status);
+    if (!undo) return;
+    toast(el.dataset.status === 'Reply owed' ? 'Marked reply owed.' : 'Marked no reply needed. It counts as a check-in.',
+      { action: { label: 'Undo', fn: () => actions.undoReplyStatus(undo) } });
   }
 };
 

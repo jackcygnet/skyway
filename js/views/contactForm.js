@@ -8,7 +8,7 @@ import {
   CADENCE_CHOICES, parseCadence, firstName
 } from '../util.js';
 import { icon } from '../icons.js';
-import { attendanceItem } from '../actions.js';
+import { attendanceItem, addedItems } from '../actions.js';
 import { avatar, sheetHead, sheetFoot, pickerBox, updatePicker, pickerEnter, syncDraft, empty } from './parts.js';
 
 let draft = null;
@@ -25,17 +25,21 @@ function init(route) {
   const c = editing ? model.getLive('Contacts', route.parts[1]) : null;
   const ev = editing ? null : routeEvent(route);
   const autoSort = c ? (!String(c.sortName || '').trim() || c.sortName === defaultSortName(c.name)) : true;
+  // Adding someone from the review queue: their name and address come along.
+  const queued = !editing && route.q.get('rq') ? model.getLive('ReviewQueue', route.q.get('rq')) : null;
+  const queuedEmail = queued ? (route.q.get('email') || queued.email || '') : '';
   draft = {
     key: route.hash,
     id: c ? c.id : '',
     missing: editing && !c,
     eventId: ev ? ev.id : '',
+    queueId: queued ? queued.id : '',
     name: c ? c.name || '' : (route.q.get('name') || ''),
     orgName: c ? model.orgName(c.orgId) : '',
     title: c ? c.title || '' : '',
     whatTheyDo: c ? c.whatTheyDo || '' : '',
     howMet: c ? c.howMet || '' : (ev ? ev.name : ''),
-    emails: c && (c.emails || []).length ? c.emails.slice() : [''],
+    emails: c && (c.emails || []).length ? c.emails.slice() : [queuedEmail],
     phone: c ? c.phone || '' : '',
     linkedIn: c ? c.linkedIn || '' : '',
     city: c ? c.city || '' : '',
@@ -51,8 +55,8 @@ function init(route) {
     alsoLog: !editing && !!ev,
     errors: {}
   };
-  draft.more = !!(c && (draft.emails.some(Boolean) || draft.phone || draft.linkedIn || draft.city || draft.introducedById ||
-    draft.schools || draft.birthday || draft.tags || draft.oneNoteLink || draft.sortName));
+  draft.more = !!(queuedEmail || (c && (draft.emails.some(Boolean) || draft.phone || draft.linkedIn || draft.city || draft.introducedById ||
+    draft.schools || draft.birthday || draft.tags || draft.oneNoteLink || draft.sortName)));
 }
 
 function err(name) {
@@ -226,8 +230,9 @@ async function save() {
     tags: splitList(draft.tags), birthday: draft.birthday.trim(), oneNoteLink: draft.oneNoteLink.trim(),
     tier: draft.tier, cadence: draft.cadence, personalNotes: draft.personalNotes.trim()
   };
-  if (!editing) rec.source = 'App';
+  if (!editing) rec.source = draft.queueId ? 'Review queue' : 'App';
   items.push({ t: 'Contacts', r: rec });
+  if (!editing && draft.queueId) addedItems(draft.queueId, id).forEach((x) => items.push(x));
 
   // Moving to a new organization keeps the old one in their history.
   if (prev && prev.orgId && prev.orgId !== orgId && model.getLive('Organizations', prev.orgId)) {
@@ -249,7 +254,13 @@ async function save() {
 
   await store.saveMany(items);
   const logNext = !editing && !ev && draft.alsoLog;
+  const fromQueue = !editing && !!draft.queueId;
   draft = null;
+  if (fromQueue) {
+    toast('Added ' + name + '. Your earlier emails with them are logged within 15 minutes.', { ms: 5000 });
+    ui.backTo('#/review');
+    return;
+  }
   toast(editing ? 'Saved' : 'Added ' + name);
   if (editing) ui.backTo('#/people/' + id);
   else ui.replace(logNext ? '#/log?who=' + id : '#/people/' + id);
@@ -293,7 +304,7 @@ export default {
   submit() { return save(); },
   act: {
     close() {
-      const back = draft && draft.id ? '#/people/' + draft.id : '#/people';
+      const back = draft && draft.id ? '#/people/' + draft.id : (draft && draft.queueId ? '#/review' : '#/people');
       draft = null;
       ui.back(back);
     },
